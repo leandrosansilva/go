@@ -28,10 +28,33 @@ var ErrMessageTooLarge = errors.New("multipart: message too large")
 // It returns ErrMessageTooLarge if all non-file parts can't be stored in
 // memory.
 func (r *Reader) ReadForm(maxMemory int64) (*Form, error) {
-	return r.readForm(maxMemory)
+	return r.readForm(maxMemory, ReadLargeFileToTemp)
 }
 
-func (r *Reader) readForm(maxMemory int64) (_ *Form, err error) {
+func (r *Reader) ReadForm2(maxMemory int64, largeFileReader LargeFileReaderFunc) (*Form, error) {
+	return r.readForm(maxMemory, largeFileReader)
+}
+
+type LargeFileReaderFunc func(file io.Reader, name, filename string) (tmpFile *os.File, size int64, err error)
+
+func ReadLargeFileToTemp(file io.Reader, name, filename string) (*os.File, int64, error) {
+	tempfile, err := ioutil.TempFile("", "multipart-")
+	if err != nil {
+		return nil, 0, err
+	}
+	size, err := io.Copy(tempfile, file)
+	if cerr := tempfile.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(tempfile.Name())
+		return nil, 0, err
+	}
+
+	return tempfile, size, nil
+}
+
+func (r *Reader) readForm(maxMemory int64, largeFileReader LargeFileReaderFunc) (_ *Form, err error) {
 	form := &Form{make(map[string][]string), make(map[string][]*FileHeader)}
 	defer func() {
 		if err != nil {
@@ -82,20 +105,13 @@ func (r *Reader) readForm(maxMemory int64) (_ *Form, err error) {
 			return nil, err
 		}
 		if n > maxMemory {
-			// too big, write to disk and flush buffer
-			file, err := ioutil.TempFile("", "multipart-")
+			tmpfile, size, err := largeFileReader(io.MultiReader(&b, p), name, filename)
+
 			if err != nil {
 				return nil, err
 			}
-			size, err := io.Copy(file, io.MultiReader(&b, p))
-			if cerr := file.Close(); err == nil {
-				err = cerr
-			}
-			if err != nil {
-				os.Remove(file.Name())
-				return nil, err
-			}
-			fh.tmpfile = file.Name()
+
+			fh.tmpfile = tmpfile.Name()
 			fh.Size = size
 		} else {
 			fh.content = b.Bytes()

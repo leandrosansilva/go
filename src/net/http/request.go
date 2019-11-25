@@ -1270,13 +1270,7 @@ func (r *Request) ParseForm() error {
 	return err
 }
 
-// ParseMultipartForm parses a request body as multipart/form-data.
-// The whole request body is parsed and up to a total of maxMemory bytes of
-// its file parts are stored in memory, with the remainder stored on
-// disk in temporary files.
-// ParseMultipartForm calls ParseForm if necessary.
-// After one call to ParseMultipartForm, subsequent calls have no effect.
-func (r *Request) ParseMultipartForm(maxMemory int64) error {
+func (r *Request) parseMultipartForm(maxMemory int64, largeFileReader multipart.LargeFileReaderFunc) error {
 	if r.MultipartForm == multipartByReader {
 		return errors.New("http: multipart handled by MultipartReader")
 	}
@@ -1295,7 +1289,7 @@ func (r *Request) ParseMultipartForm(maxMemory int64) error {
 		return err
 	}
 
-	f, err := mr.ReadForm(maxMemory)
+	f, err := mr.ReadForm2(maxMemory, largeFileReader)
 	if err != nil {
 		return err
 	}
@@ -1312,6 +1306,20 @@ func (r *Request) ParseMultipartForm(maxMemory int64) error {
 	r.MultipartForm = f
 
 	return nil
+}
+
+// ParseMultipartForm parses a request body as multipart/form-data.
+// The whole request body is parsed and up to a total of maxMemory bytes of
+// its file parts are stored in memory, with the remainder stored on
+// disk in temporary files.
+// ParseMultipartForm calls ParseForm if necessary.
+// After one call to ParseMultipartForm, subsequent calls have no effect.
+func (r *Request) ParseMultipartForm(maxMemory int64) error {
+	return r.parseMultipartForm(maxMemory, multipart.ReadLargeFileToTemp)
+}
+
+func (r *Request) ParseMultipartForm2(maxMemory int64, largeFileReader multipart.LargeFileReaderFunc) error {
+	return r.parseMultipartForm(maxMemory, largeFileReader)
 }
 
 // FormValue returns the first value for the named component of the query.
